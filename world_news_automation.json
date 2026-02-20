@@ -1,0 +1,560 @@
+{
+  "name": "World News",
+  "nodes": [
+    {
+      "parameters": {
+        "url": "https://feeds.bbci.co.uk/news/rss.xml",
+        "options": {
+          "customFields": ""
+        }
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        208,
+        -144
+      ],
+      "id": "8ff011d4-80d0-487d-b7ed-9c15ff532994",
+      "name": "BBC World"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get all items from the RSS Feed node.\nconst allItems = items;\n\n// --- 1. Define the time window ---\n// Calculate the date for 7 days ago.\n// (I've used 7 days since 3 was returning only one item for you).\nconst sevenDaysAgo = new Date();\nsevenDaysAgo.setDate(new Date().getDate() - 7);\n\n// --- 2. Filter for recent items ---\n// Most RSS nodes in n8n provide a standardized 'isoDate' field.\nconst recentItems = allItems.filter(item => {\n  // Ensure the item has a date to avoid errors.\n  if (!item.json.isoDate) {\n    return false;\n  }\n  const itemDate = new Date(item.json.isoDate);\n  return itemDate >= sevenDaysAgo;\n});\n\n// --- 3. Return the result based on the requirements ---\n// If we found any recent items, return only those.\nif (recentItems.length > 0) {\n  return recentItems;\n}\n\n// If there were NO recent items, but we have items from the feed,\n// return just the first (newest) item to prevent the workflow from breaking.\nif (allItems.length > 0) {\n  return [allItems[0]];\n}\n\n// If the RSS feed was empty to begin with, return an empty array.\nreturn [];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        544,
+        304
+      ],
+      "id": "a6065f83-641c-474e-8b8d-fe2e29fbea4f",
+      "name": "filter rss feed"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get all items passed from the previous Code node.\nconst filteredItems = items;\n\n// --- UPDATED & EXPANDED FILTER ---\n// We create a \"blocklist\" of keywords. Any title containing one of these will be removed.\nconst blocklist = [\n  'quordle',\n  'nyt strands',\n  'black friday',\n  'deals',\n  'sale' // Added 'sale' as another common ad word\n];\n\nconst itemsToKeep = filteredItems.filter(item => {\n  if (!item.json.title) {\n    return true; // Keep items that have no title, just in case.\n  }\n  \n  const titleLower = item.json.title.toLowerCase();\n  \n  // This line checks if the title contains ANY of the words from our blocklist.\n  const hasBlockedWord = blocklist.some(keyword => titleLower.includes(keyword));\n  \n  // Return true (keep the item) only if it does NOT have a blocked word.\n  return !hasBlockedWord;\n});\n// --- END UPDATED FILTER ---\n\n// Sort the remaining items by date.\nitemsToKeep.sort((a, b) => {\n  const dateA = new Date(a.json.isoDate);\n  const dateB = new Date(b.json.isoDate);\n  return dateB - dateA; // Newest first\n});\n\n// Return the first 5 items from the cleaned list.\nreturn itemsToKeep.slice(0, 10);"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        736,
+        304
+      ],
+      "id": "43058f2d-1573-4e7e-8973-8b88d7376d31",
+      "name": "get top 5 news"
+    },
+    {
+      "parameters": {
+        "jsCode": "/*\nThis script formats the final list of news items into a single,\nclean, mobile-friendly text message with bold titles and separators.\n*/\n\n// --- Helper Function: Strip HTML Tags ---\nfunction stripHtml(html) {\n  if (!html) return '';\n  let text = html.replace(/<[^>]+>/g, '');\n  text = text.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '\"').replace(/&#39;/g, \"'\");\n  return text.trim();\n}\n\n// --- Helper Function: Get First N Sentences ---\nfunction getFirstSentences(text, n) {\n  if (!text) return '';\n  const sentences = text.match(/[^.!?]+[.!?]+(\\s+|$)/g);\n  if (sentences && sentences.length > 0) {\n    return sentences.slice(0, n).join(' ').trim();\n  }\n  return text;\n}\n\n// --- Main Execution ---\n// Get items from the 'get top 5 news' node\nconst itemsToFormat = items;\n\nconst messageLines = [];\nmessageLines.push('🌍 World News:');\n\nitemsToFormat.forEach((item, index) => {\n  const title = item.json.title;\n  const url = item.json.link;\n  const rawContent = item.json['content:encoded'] || item.json.content || item.json.description || '';\n  const plainText = stripHtml(rawContent);\n  const description = getFirstSentences(plainText, 5);\n\n  // If this is NOT the first item (index > 0), add a separator line.\n  if (index > 0) {\n    messageLines.push(''); // Add a blank line for spacing\n    messageLines.push('---'); // Add the horizontal rule\n  }\n\n  // Add a blank line before the content\n  messageLines.push(''); \n  \n  // 1. Title (Numbered and BOLD)\n  messageLines.push(`${index + 1}. **${title}**`);\n  \n  // 2. Description (plain text, separated by a blank line)\n  if (description) {\n    messageLines.push(''); // Add a blank line\n    messageLines.push(description); // Add the description as plain text\n  }\n  \n  // 3. A \"Read more\" link, with a blank line before it\n  messageLines.push(''); // Add a blank line\n  messageLines.push(`[Read more](${url})`);\n});\n\nconst finalMessage = messageLines.join('\\n');\n\n// Return as a single item for the Telegram/messaging node\nreturn [{\n  json: {\n    message: finalMessage\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        944,
+        304
+      ],
+      "id": "a56c99d7-7093-4433-8939-f102e73fa439",
+      "name": "format"
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -544,
+        -144
+      ],
+      "id": "ffcdd61f-6d8c-4cb0-8260-7dca5c2f9512",
+      "name": "Telegram Trigger",
+      "webhookId": "512fca76-9af9-4e5c-9651-ec47ace45c5c",
+      "credentials": {
+        "telegramApi": {
+          "id": "iF4KgEyN6sE8Zhj5",
+          "name": "World News Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "-1003244786154",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1136,
+        304
+      ],
+      "id": "0fba10ab-9fe3-48e8-8470-860b1e5619ab",
+      "name": "Send to Group",
+      "webhookId": "aaa31bc2-c2a0-4041-9780-7930e42b5e13",
+      "credentials": {
+        "telegramApi": {
+          "id": "iF4KgEyN6sE8Zhj5",
+          "name": "World News Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "-1003244786154",
+        "text": "=Enter a valid command! Like,\n\n/bbc\n\n/reuters\n\n/alj\n\n/guardian\n\n/cnn\n",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -848,
+        -144
+      ],
+      "id": "220a69ff-05ae-45f9-bb3d-6ba090e808c3",
+      "name": "Error message",
+      "webhookId": "aaa31bc2-c2a0-4041-9780-7930e42b5e13",
+      "credentials": {
+        "telegramApi": {
+          "id": "iF4KgEyN6sE8Zhj5",
+          "name": "World News Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f47b6124-15dd-43b2-aca4-acba40e806a5",
+              "leftValue": "={{ $json.message.text }}",
+              "rightValue": "/bbc",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -144,
+        -144
+      ],
+      "id": "3314833c-e027-4478-b8d5-065b996d8af2",
+      "name": "BBC"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9e84d025-1ed7-43b2-8390-b521d9c5f5eb",
+              "leftValue": "={{ $json.message.text }}",
+              "rightValue": "/cnn",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -128,
+        80
+      ],
+      "id": "0bc90983-471f-470e-a1ea-1e048edd6895",
+      "name": "CNN"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9e84d025-1ed7-43b2-8390-b521d9c5f5eb",
+              "leftValue": "={{ $json.message.text }}",
+              "rightValue": "/reuters",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -128,
+        288
+      ],
+      "id": "68f63523-e9e6-4b60-878a-4799c3d78a7c",
+      "name": "Reuters"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9e84d025-1ed7-43b2-8390-b521d9c5f5eb",
+              "leftValue": "={{ $json.message.text }}",
+              "rightValue": "/alj",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -128,
+        512
+      ],
+      "id": "cbac3e93-6797-49e6-9662-04a403d104c4",
+      "name": "Aljazeera"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9e84d025-1ed7-43b2-8390-b521d9c5f5eb",
+              "leftValue": "={{ $json.message.text }}",
+              "rightValue": "/guardian",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -128,
+        736
+      ],
+      "id": "a12d17ed-e3b9-4668-a5e7-81dcc260ca82",
+      "name": "Guardian"
+    },
+    {
+      "parameters": {
+        "url": "http://rss.cnn.com/rss/cnn_world.rss",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        208,
+        64
+      ],
+      "id": "5e3b3056-c076-43ce-a317-f46f3f1b4e7f",
+      "name": "CNN World"
+    },
+    {
+      "parameters": {
+        "url": "https://news.google.com/rss/search?q=site%3Areuters.com&hl=en-US&gl=US&ceid=US%3Aen",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        208,
+        272
+      ],
+      "id": "a9e5f1d9-c09d-4558-a6d1-328356c2d705",
+      "name": "Reuters World"
+    },
+    {
+      "parameters": {
+        "url": "https://www.aljazeera.com/xml/rss/all.xml",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        208,
+        512
+      ],
+      "id": "b5d87649-c468-4867-8b4a-3032d44f6ff0",
+      "name": "ALJ World"
+    },
+    {
+      "parameters": {
+        "url": "https://www.theguardian.com/world/rss",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        208,
+        720
+      ],
+      "id": "904894a1-cb84-4225-86c9-0a0b48ecb112",
+      "name": "Guardian World"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "filter rss feed": {
+      "main": [
+        [
+          {
+            "node": "get top 5 news",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get top 5 news": {
+      "main": [
+        [
+          {
+            "node": "format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "format": {
+      "main": [
+        [
+          {
+            "node": "Send to Group",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BBC World": {
+      "main": [
+        [
+          {
+            "node": "filter rss feed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "BBC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BBC": {
+      "main": [
+        [
+          {
+            "node": "BBC World",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CNN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CNN": {
+      "main": [
+        [
+          {
+            "node": "CNN World",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reuters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reuters": {
+      "main": [
+        [
+          {
+            "node": "Reuters World",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Aljazeera",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aljazeera": {
+      "main": [
+        [
+          {
+            "node": "ALJ World",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Guardian",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CNN World": {
+      "main": [
+        [
+          {
+            "node": "filter rss feed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reuters World": {
+      "main": [
+        [
+          {
+            "node": "filter rss feed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardian": {
+      "main": [
+        [
+          {
+            "node": "Guardian World",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardian World": {
+      "main": [
+        [
+          {
+            "node": "filter rss feed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ALJ World": {
+      "main": [
+        [
+          {
+            "node": "filter rss feed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "3fd5b432-2428-4b61-a20b-d698d5c56b9f",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "558d88703fb65b2d0e44613bc35916258b0f0bf983c5d4730c00c424b77ca36a"
+  },
+  "id": "CRsM0LizFw0o3cDi",
+  "tags": []
+}
